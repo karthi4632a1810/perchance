@@ -2,6 +2,10 @@
 
 Uses the free model behind https://perchance.org/ai-code-generator through your own browser session. It works with Cline, Roo Code, Continue, or any OpenAI client.
 
+It can also generate images through https://perchance.org/text-to-image-plugin (see [Image generation](#image-generation)).
+
+For a Telegram chat bot that runs on ordinary PHP hosting such as Hostinger, see [telegram-bot/](telegram-bot/README.md).
+
 ```
 Cline ──/v1/chat/completions + tools──▶ server.py :8010 ──one prompt──▶ text-generation.perchance.org
   ▲   runs the tool calls on your machine     │  parses ```tool_call blocks from the reply
@@ -52,6 +56,43 @@ client = OpenAI(base_url="http://127.0.0.1:8010/v1", api_key="x")
 print(client.chat.completions.create(model="perchance", messages=[{"role": "user", "content": "hi"}]).choices[0].message.content)
 ```
 
+Perchance runs one request per key at a time. If a second one arrives, for example from another Cline task, the proxy waits for the first to finish. The log then shows `waiting_for_prev_request_to_finish`.
+
+## Image generation
+
+The image generator has its own key. On https://perchance.org/text-to-image-plugin, generate one image with DevTools open. Then copy two values from the `generate?...` request (Payload) into `.env`:
+- `userKey` into `PERCHANCE_IMAGE_USER_KEY`
+- `adAccessCode` into `PERCHANCE_AD_ACCESS_CODE`
+
+`PERCHANCE_CF_CLEARANCE` is shared with the text side.
+
+The `adAccessCode` is how Perchance ties free image generation to the ads on its page. When it stops being accepted, you get an error saying so. Generate an image on the site again and copy the new code.
+
+From the command line:
+
+```bash
+python3 perchance.py --image "a lighthouse on a rocky coast at sunset" --size 768x512
+```
+
+Through the proxy, from any OpenAI client:
+
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://127.0.0.1:8010/v1", api_key="x")
+image = client.images.generate(model="perchance-image", prompt="a red apple on a wooden table", size="1024x1024")
+print(image.data[0].url)   # http://127.0.0.1:8010/images/<file>.jpeg
+```
+
+Request options:
+- **`size`:** square sizes become 512×512, portrait 512×768, and landscape 768×512.
+- **`n`:** up to 4 images, generated one after another.
+- **`response_format`:** `"url"` (default) or `"b64_json"`.
+- **Perchance's own options:** `negative_prompt`, `seed` and `guidance_scale` (default 7).
+
+Every image is also saved in `images/`. One image takes about 3–7 seconds.
+
+Perchance flags some images as possibly not safe for work, and the site hides those by default. The proxy does the same: it returns an error instead of the image. Setting `PERCHANCE_IMAGE_ALLOW_NSFW=true` in `.env` turns this off, like changing the site's safety setting.
+
 ## When it stops working
 
 Cline shows an error with "re-verified" or "Unexpected reply". This means the userKey or `cf_clearance` has expired.
@@ -69,6 +110,7 @@ If the model does something odd, check `last_prompt.txt` and `last_reply.txt` to
 |---|---|---|
 | `PORT` / `HOST` | `8010` / `127.0.0.1` | Where the proxy listens |
 | `PERCHANCE_MAX_CONTINUES` (also in `.env`) | `24` | Extra requests allowed to finish one long reply |
+| `PERCHANCE_IMAGE_ALLOW_NSFW` (also in `.env`) | `false` | Return images Perchance flags as maybe NSFW (the site hides them by default) |
 | `PERCHANCE_MAX_INPUT_CHARS` (also in `.env`) | `46000` | Prompt plus reply so far allowed in one request. Perchance returned `"error": true` at about 52,500. |
 | `MAX_PROMPT_CHARS` | `34000` | Max prompt size. Older tool output is shortened to fit, which leaves room for the reply. |
 | `MAX_TOOL_RESULT_CHARS` | `12000` | Max characters kept per tool result |
@@ -81,7 +123,7 @@ If the model does something odd, check `last_prompt.txt` and `last_reply.txt` to
 
 ## Limits
 
-- **No images.** Perchance can't see images; the model only gets "[image attached]".
+- **No image input.** The text model can't see images; it only gets "[image attached]". Image generation is separate (see above).
 - **Small context.** Perchance holds only about 52,000 characters (roughly 15k tokens), and the conversation is resent on every step. In long tasks, old tool output gets shortened and the oldest messages are dropped.
 - **The session expires.** `cf_clearance` is tied to your IP and User-Agent.
 - **Perchance is a free, ad-funded site.** Heavy automated use can get the key blocked.

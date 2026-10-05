@@ -1,17 +1,21 @@
 """
-Client for Perchance's free text generator (text-generation.perchance.org/api/generate).
+Client for Perchance's free text generator (text-generation.perchance.org/api/generate) and its
+text-to-image plugin (image-generation.perchance.org/api/generate).
 
-It reuses the session from your own browser: the userKey from a generate request and the
-cf_clearance cookie, both copied from Chrome DevTools into .env. cf_clearance only works
-with the same User-Agent (and usually the same IP) it was issued to.
+It reuses the session from your own browser: the userKey (and, for images, the adAccessCode) from a
+generate request and the cf_clearance cookie, all copied from Chrome DevTools into .env.
+cf_clearance only works with the same User-Agent (and usually the same IP) it was issued to.
 
-Quick test:  python3 perchance.py "Write a Python function that reverses a string"
+Quick tests:  python3 perchance.py "Write a Python function that reverses a string"
+              python3 perchance.py --image "a red apple on a wooden table"
 """
 
+import argparse
 import json
 import os
 import random
 import sys
+import time
 
 import requests
 
@@ -33,16 +37,31 @@ DEFAULTS = {
     "PERCHANCE_MAX_CONTINUES": "24",
     # Perchance fails ("error": true) past roughly 52,000 characters of instruction + reply so far.
     "PERCHANCE_MAX_INPUT_CHARS": "46000",
+    "PERCHANCE_IMAGE_BASE_URL": "https://image-generation.perchance.org",
+    "PERCHANCE_IMAGE_USER_KEY": "",
+    "PERCHANCE_AD_ACCESS_CODE": "",
+    # Like the site's default safety setting, images Perchance flags as maybe NSFW are not returned.
+    "PERCHANCE_IMAGE_ALLOW_NSFW": "false",
 }
 
 REFRESH_HINT = (
     "Open https://perchance.org/ai-code-generator in Chrome, generate once, then copy the "
     "userKey (Network > generate request > Payload) and the cf_clearance cookie into .env."
 )
+IMAGE_REFRESH_HINT = (
+    "Open https://perchance.org/text-to-image-plugin in Chrome, generate one image, then copy the userKey "
+    "and adAccessCode (Network > generate request > Payload) into PERCHANCE_IMAGE_USER_KEY and "
+    "PERCHANCE_AD_ACCESS_CODE in .env, and the cf_clearance cookie into PERCHANCE_CF_CLEARANCE."
+)
+IMAGES_DIR = os.path.join(SCRIPT_DIR, "images")
 
 
 class PerchanceError(RuntimeError):
     pass
+
+
+class PerchanceBusy(PerchanceError):
+    """Perchance is still generating an earlier request for the same userKey (it runs one at a time)."""
 
 
 def load_config():
@@ -121,9 +140,11 @@ def _request(instruction, start_with, stop, config, result):
 
     with resp:
         if resp.status_code != 200:
-            raise PerchanceError(
-                f"Perchance returned HTTP {resp.status_code}: {resp.text[:300]!r}. " + REFRESH_HINT
-            )
+            text = resp.text[:300]
+            # HTTP 203 {"status":"waiting_for_prev_request_to_finish",...}: another request is still running.
+            if "waiting_for_prev_request_to_finish" in text:
+                raise PerchanceBusy(text)
+            raise PerchanceError(f"Perchance returned HTTP {resp.status_code}: {text!r}. " + REFRESH_HINT)
         # Seen in the browser when the key is missing or no longer verified.
         reverify = bool(resp.headers.get("X-Should-Reverify"))
         got_text = False
@@ -157,7 +178,7 @@ def _ends_in_stop_sequence(text, stop):
     return any(s in text[-(len(s) + 20):] for s in stop)
 
 
-def generate(instruction, start_with="", stop=None, config=None, on_continue=None, info=None):
+def generate(instruction, start_with="", stop=None, config=None, on_continue=None, info=None, on_wait=None):
     """Yield the reply text in chunks as Perchance streams it.
 
     Perchance ends every reply after 1024 tokens with stopReason "artificial", the same reason it
@@ -165,7 +186,8 @@ def generate(instruction, start_with="", stop=None, config=None, on_continue=Non
     "continue" button does it: the same instruction again, with startWith set to the text so far.
     on_continue(n, max_continues, chars_so_far) is called before each continuation. If the reply
     can't be finished (context full, too many continuations, a failed continuation), the text so far
-    is kept and info["truncated"] says why.
+    is kept and info["truncated"] says why. While Perchance is still busy with an earlier request for
+    the same key, it waits and asks again; on_wait(status) is called each time.
     """
     config = config or load_config()
     if not config["PERCHANCE_USER_KEY"]:
@@ -186,26 +208,140 @@ def generate(instruction, start_with="", stop=None, config=None, on_continue=Non
             if on_continue:
                 on_continue(n, max_continues, len(reply))
         result, before = {}, len(reply)
-        try:
-            for chunk in _request(instruction, start_with + reply, stop, config, result):
-                reply += chunk
-                yield chunk
-        except PerchanceError as e:
-            if not reply:
-                raise
-            info["truncated"] = f"a continuation failed ({e})"
-            return
+        busy_until = time.time() + float(config["PERCHANCE_TIMEOUT"])
+        while True:
+            try:
+                for chunk in _request(instruction, start_with + reply, stop, config, result):
+                    reply += chunk
+                    yield chunk
+                break
+            except PerchanceBusy:
+                if time.time() > busy_until:
+                    raise PerchanceError("Perchance stayed busy with an earlier request for this userKey "
+                                         "(is another Cline task or script using the same key?).")
+                if on_wait:
+                    on_wait("waiting_for_prev_request_to_finish")
+                time.sleep(2 + random.random() * 2)
+            except PerchanceError as e:
+                if not reply:
+                    raise
+                info["truncated"] = f"a continuation failed ({e})"
+                return
         cut_by_limit = result.get("stop_reason") == "artificial" and not _ends_in_stop_sequence(reply, stop)
         if not cut_by_limit or len(reply) == before:
             return
     info["truncated"] = f"it needed more than {max_continues} continuations"
 
 
+def _image_headers(config):
+    headers = {
+        "User-Agent": config["PERCHANCE_USER_AGENT"],
+        "Accept": "*/*",
+        "Origin": "https://image-generation.perchance.org",
+        "Referer": "https://image-generation.perchance.org/embed",
+    }
+    if config["PERCHANCE_CF_CLEARANCE"]:
+        headers["Cookie"] = "cf_clearance=" + config["PERCHANCE_CF_CLEARANCE"]
+    return headers
+
+
+def _looks_like_image(data):
+    return data[:3] == b"\xff\xd8\xff" or data[:8] == b"\x89PNG\r\n\x1a\n" or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+
+
+def generate_image(prompt, negative_prompt="", resolution="512x512", seed=-1, guidance_scale=7, config=None, on_wait=None):
+    """Generate one image with Perchance's text-to-image plugin.
+
+    Follows the site's own client (image-generation.perchance.org/embed): one requestId per image,
+    asking again while the queue is busy, then downloading the result from imageDownloadUrl.
+    Returns {"data", "extension", "seed", "width", "height"}.
+    """
+    config = config or load_config()
+    key, code = config["PERCHANCE_IMAGE_USER_KEY"], config["PERCHANCE_AD_ACCESS_CODE"]
+    if not key or not code:
+        raise PerchanceError("PERCHANCE_IMAGE_USER_KEY and PERCHANCE_AD_ACCESS_CODE are not set. " + IMAGE_REFRESH_HINT)
+    base = config["PERCHANCE_IMAGE_BASE_URL"].rstrip("/")
+    headers = _image_headers(config)
+    request_id = str(random.random())
+    body = {"prompt": prompt, "negativePrompt": negative_prompt, "seed": seed, "resolution": resolution,
+            "guidanceScale": guidance_scale, "channel": "text-to-image-plugin", "subChannel": "public",
+            "userKey": key, "adAccessCode": code, "requestId": request_id}
+    deadline = time.time() + float(config["PERCHANCE_TIMEOUT"])
+    while True:
+        params = {"userKey": key, "requestId": request_id, "adAccessCode": code, "__cacheBust": random.random()}
+        try:
+            resp = requests.post(base + "/api/generate", params=params, data=json.dumps(body).encode("utf-8"),
+                                 headers={**headers, "Content-Type": "text/plain;charset=UTF-8"}, timeout=(15, 120))
+        except requests.RequestException as e:
+            raise PerchanceError(f"Could not reach Perchance's image generator: {e}") from e
+        try:
+            result = resp.json()
+        except ValueError:
+            raise PerchanceError(f"Perchance's image generator returned HTTP {resp.status_code}: "
+                                 f"{resp.text[:300]!r}. " + IMAGE_REFRESH_HINT)
+        status = result.get("status")
+        if status == "success":
+            break
+        # The site waits 2-4 seconds and asks again in these cases.
+        if status in ("waiting_for_prev_request_to_finish", "network_busy") and time.time() < deadline:
+            if on_wait:
+                on_wait(status)
+            time.sleep(2 + random.random() * 2)
+            continue
+        hint = " " + IMAGE_REFRESH_HINT if status in ("invalid_key", "invalid_ad_access_code") else ""
+        raise PerchanceError(f"Perchance image generation failed: {status or json.dumps(result)[:300]}.{hint}")
+
+    if result.get("maybeNsfw") and config["PERCHANCE_IMAGE_ALLOW_NSFW"].strip().lower() not in ("1", "true", "yes", "on"):
+        raise PerchanceError("Perchance flagged this image as possibly not safe for work, so it was not returned "
+                             "(the site hides these by default too; PERCHANCE_IMAGE_ALLOW_NSFW=true in .env changes that).")
+    url = result.get("imageDownloadUrl") or f"/api/downloadTemporaryImage?imageId={result.get('imageId')}"
+    url = url if url.startswith("http") else base + url
+    problem = "no attempt made"
+    for attempt in range(3):
+        if attempt:
+            time.sleep(2)
+        try:
+            image = requests.get(url, headers=headers, timeout=(15, 60))
+        except requests.RequestException as e:
+            problem = str(e)
+            continue
+        if image.status_code == 200 and _looks_like_image(image.content):
+            return {"data": image.content, "extension": result.get("fileExtension") or "jpeg",
+                    "seed": result.get("seed"), "width": result.get("width"), "height": result.get("height")}
+        problem = f"HTTP {image.status_code}, {len(image.content)} bytes"
+    raise PerchanceError(f"The image was generated but could not be downloaded ({problem}).")
+
+
+def save_image(image, prompt=""):
+    """Saves a generate_image() result under images/ and returns the file path."""
+    os.makedirs(IMAGES_DIR, exist_ok=True)
+    words = "-".join("".join(c for c in w if c.isalnum()) for w in prompt.lower().split()[:6]).strip("-")
+    stem = f"{time.strftime('%Y%m%d-%H%M%S')}-{words or 'image'}-{image['seed']}"
+    for n in range(1, 1000):
+        path = os.path.join(IMAGES_DIR, f"{stem}{f'-{n}' if n > 1 else ''}.{image['extension']}")
+        try:
+            with open(path, "xb") as f:   # "x": never overwrite an image saved in the same second
+                f.write(image["data"])
+            return path
+        except FileExistsError:
+            continue
+    raise PerchanceError(f"Could not find a free file name for {stem} in {IMAGES_DIR}")
+
+
 if __name__ == "__main__":
-    prompt = " ".join(sys.argv[1:]) or sys.stdin.read()
+    parser = argparse.ArgumentParser(description="Try Perchance's text or image generator from the command line.")
+    parser.add_argument("prompt", nargs="*", help="the prompt (read from stdin if empty)")
+    parser.add_argument("--image", action="store_true", help="generate an image and save it under images/")
+    parser.add_argument("--size", default="512x512", help="image resolution, e.g. 512x512, 512x768, 768x512")
+    parser.add_argument("--negative", default="", help="things the image should not contain")
+    args = parser.parse_args()
+    prompt = " ".join(args.prompt) or sys.stdin.read()
     try:
-        for piece in generate(prompt):
-            print(piece, end="", flush=True)
-        print()
+        if args.image:
+            print(save_image(generate_image(prompt, args.negative, args.size), prompt))
+        else:
+            for piece in generate(prompt):
+                print(piece, end="", flush=True)
+            print()
     except PerchanceError as e:
         sys.exit(f"\n{e}")

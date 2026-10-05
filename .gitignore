@@ -3,3 +3,7 @@ __pycache__/
 last_request.json
 last_prompt.txt
 last_reply.txt
+images/
+telegram-bot/data/*
+!telegram-bot/data/.htaccess
+telegram-bot.zip

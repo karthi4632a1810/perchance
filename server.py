@@ -1,13 +1,15 @@
 """
 OpenAI-compatible API over Perchance's free text generator, with tool calling for coding agents
-such as Cline, Roo Code and Continue.
+such as Cline, Roo Code and Continue, plus image generation through its text-to-image plugin.
 
 Point the client at  http://127.0.0.1:8010/v1  with any API key and model "perchance".
 When a request has tools, they are described to the model, which calls them with ```tool_call
 blocks; those go back to the client as real OpenAI tool_calls (see agent.py).
+Images: POST /v1/images/generations (model "perchance-image"); they are also saved under images/.
 """
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -15,12 +17,13 @@ import time
 import traceback
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote
 
 from agent import (
     MAX_REPAIR_ROUNDS, NUDGE_PROMPT, build_full_prompt, content_to_text, cut_invented_turns,
     needs_nudge, normalize_tools, parse_model_reply, repair_prompt, split_large_writes,
 )
-from perchance import PerchanceError, approx_tokens, generate
+from perchance import IMAGES_DIR, PerchanceError, approx_tokens, generate, generate_image, save_image
 
 
 def _env_bool(name, default):
@@ -29,6 +32,9 @@ def _env_bool(name, default):
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_ID = "perchance"
+IMAGE_MODEL_ID = "perchance-image"
+MAX_IMAGES_PER_REQUEST = 4   # Perchance makes them one after another
+IMAGE_TYPES = {"jpeg": "image/jpeg", "jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
 STREAM_PROGRESS = _env_bool("STREAM_PROGRESS", True)   # live model text as reasoning_content
 DEBUG_DUMPS = _env_bool("DEBUG_DUMPS", True)           # last_request.json / last_prompt.txt / last_reply.txt
 # The model sometimes keeps going and invents the tool results itself; stop it there.
@@ -51,6 +57,21 @@ def dump_debug(name, text):
 
 def log_continue(n, max_continues, chars):
     log(f"[~] Perchance cut the reply at {chars} chars; continuing ({n}/{max_continues})...")
+
+
+def log_wait(status):
+    log(f"[~] Perchance: {status} (it runs one request per key at a time); waiting...")
+
+
+def perchance_resolution(size):
+    """OpenAI sizes (1024x1024, 1024x1792, ...) -> the plugin's square, portrait or landscape resolution."""
+    try:
+        width, height = (int(x) for x in str(size or "512x512").lower().split("x"))
+    except ValueError:
+        return "512x512"
+    if width == height:
+        return "512x512"
+    return "512x768" if height > width else "768x512"
 
 
 def approx_usage(prompt, reply):
@@ -88,7 +109,8 @@ class PerchanceBackend:
         dump_debug("last_prompt.txt", self.prompt)
         self.emitter.progress_break()
         text, info = "", {}
-        for chunk in generate(self.prompt, stop=AGENT_STOP_SEQUENCES, on_continue=log_continue, info=info):
+        for chunk in generate(self.prompt, stop=AGENT_STOP_SEQUENCES, on_continue=log_continue, info=info,
+                              on_wait=log_wait):
             text += chunk
             self.emitter.progress_snapshot(text)
         self.truncated = info.get("truncated")
@@ -254,24 +276,46 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0].rstrip("/")
         if path in ("/v1/models", "/models"):
             self.send_json(200, {"object": "list", "data": [
-                {"id": MODEL_ID, "object": "model", "created": 0, "owned_by": "perchance"}
+                {"id": MODEL_ID, "object": "model", "created": 0, "owned_by": "perchance"},
+                {"id": IMAGE_MODEL_ID, "object": "model", "created": 0, "owned_by": "perchance"},
             ]})
+        elif path.startswith("/images/"):
+            self._send_image(unquote(path[len("/images/"):]))
         elif path in ("", "/health"):
             self.send_json(200, {"ok": True})
         else:
             self.send_json(404, {"error": {"message": f"Unknown path {self.path}"}})
 
+    def _send_image(self, name):
+        path = os.path.join(IMAGES_DIR, name)
+        if os.path.basename(name) != name or not os.path.isfile(path):
+            return self.send_json(404, {"error": {"message": f"No image named {name!r}"}})
+        with open(path, "rb") as f:
+            data = f.read()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", IMAGE_TYPES.get(name.rsplit(".", 1)[-1].lower(), "application/octet-stream"))
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+
     def do_POST(self):
         path = self.path.split("?")[0].rstrip("/")
-        if path not in ("/v1/chat/completions", "/chat/completions"):
+        images = path in ("/v1/images/generations", "/images/generations")
+        if not images and path not in ("/v1/chat/completions", "/chat/completions"):
             return self.send_json(404, {"error": {"message": f"Unknown path {self.path}"}})
         raw = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode("utf-8", errors="replace")
-        dump_debug("last_request.json", raw)
+        if not images:
+            dump_debug("last_request.json", raw)
         try:
             req = json.loads(raw) if raw else {}
         except ValueError:
             return self.send_json(400, {"error": {"message": "Request body is not valid JSON",
                                                   "type": "invalid_request_error"}})
+        if images:
+            return self._images_reply(req)
 
         messages = req.get("messages") or []
         stream = bool(req.get("stream"))
@@ -326,11 +370,44 @@ class Handler(BaseHTTPRequestHandler):
             prompt = build_full_prompt(messages, [])
         stop = [stop] if isinstance(stop, str) else list(stop or [])
         text = ""
-        for chunk in generate(prompt, stop=stop, on_continue=log_continue):
+        for chunk in generate(prompt, stop=stop, on_continue=log_continue, on_wait=log_wait):
             text += chunk
             emitter.content(chunk)
         emitter.finish("" if emitter.stream else text, [], approx_usage(prompt, text))
         log(f"[<] Sent {len(text)} chars")
+
+    def _images_reply(self, req):
+        """OpenAI /v1/images/generations: prompt, n, size, response_format ("url" or "b64_json"), plus
+        Perchance's negative_prompt, seed and guidance_scale. Every image is also saved under images/."""
+        prompt = str(req.get("prompt") or "").strip()
+        try:
+            n = max(1, min(MAX_IMAGES_PER_REQUEST, int(req.get("n") or 1)))
+            seed, guidance = int(req.get("seed", -1)), float(req.get("guidance_scale", 7))
+        except (TypeError, ValueError):
+            prompt = ""
+        if not prompt:
+            return self.send_json(400, {"error": {"message": "A prompt is required (and n, seed, guidance_scale "
+                                                             "must be numbers).", "type": "invalid_request_error"}})
+        resolution = perchance_resolution(req.get("size"))
+        log(f"[>] Image request: {n} x {resolution}, {prompt[:80]!r}")
+        data = []
+        try:
+            for _ in range(n):
+                image = generate_image(prompt, str(req.get("negative_prompt") or ""), resolution, seed, guidance,
+                                       on_wait=log_wait)
+                path = save_image(image, prompt)
+                log(f"[<] Image saved: images/{os.path.basename(path)} (seed {image['seed']})")
+                item = {"revised_prompt": prompt}
+                if req.get("response_format") == "b64_json":
+                    item["b64_json"] = base64.b64encode(image["data"]).decode("ascii")
+                else:
+                    item["url"] = f"http://{self.headers.get('Host') or '127.0.0.1:8010'}/images/{os.path.basename(path)}"
+                data.append(item)
+        except PerchanceError as e:
+            log(f"[!] {e}")
+            if not data:
+                return self.send_json(502, {"error": {"message": str(e), "type": "perchance_error"}})
+        self.send_json(200, {"created": int(time.time()), "data": data})
 
 
 class Server(ThreadingHTTPServer):
