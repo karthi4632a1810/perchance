@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AURELIA | Luxury Redefined</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Montserrat:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --gold: #C5A059;
+            --dark: #1A1A1A;
+            --cream: #F9F7F2;
+        }
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background-color: var(--cream);
+            color: var(--dark);
+            overflow-x: hidden;
+        }
+        h1, h2, h3, .serif {
+            font-family: 'Playfair Display', serif;
+        }
+        .nav-link {
+            position: relative;
+            transition: color 0.3s ease;
+        }
+        .nav-link::after {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 1px;
+            bottom: -2px;
+            left: 0;
+            background-color: var(--gold);
+            transition: width 0.3s ease;
+        }
+        .nav-link:hover::after {
+            width: 100%;
+        }
+        .hero-gradient {
+            background: linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.3));
+        }
+        .luxury-border {
+            border: 1px solid var(--gold);
+        }
+        .fade-in {
+            animation: fadeIn 1.5s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="fixed w-full z-50 px-8 py-6 flex justify-between items-center bg-transparent transition-all duration-500" id="main-nav">
+        <div class="text-2xl font-bold tracking-widest serif">AURELIA</div>
+        <div class="hidden md:flex space-x-12 text-sm uppercase tracking-widest">
+            <a href="#" class="nav-link">Collections</a>
+            <a href="#" class="nav-link">The Atelier</a>
+            <a href="#" class="nav-link">Our Story</a>
+            <a href="#" class="nav-link">Contact</a>
+        </div>
+        <div class="flex items-center space-x-6">
+            <a href="#" class="nav-link text-sm uppercase tracking-widest">Search</a>
+            <a href="#" class="nav-link text-sm uppercase tracking-widest relative">
+                Cart (0)
+            </a>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="relative h-screen w-full flex items-center justify-center overflow-hidden">
+        <div class="absolute inset-0 bg-black">
+            <img src="https://images.unsplash.com/photo-1441986332729-989981159442?auto=format&fit=crop&q=80&w=2000" 
+                 alt="Luxury Interior" 
+                 class="w-full h-full object-cover opacity-60">
+            <div class="absolute inset-0 hero-gradient"></div>
+        </div>
+        
+        <div class="relative z-10 text-center text-white px-4 fade-in">
+            <h1 class="text-5xl md:text-8xl mb-6 italic serif">Timeless Elegance</h1>
+            <p class="text-lg md:text-xl mb-10 font-light tracking-wide max-w-2xl mx-auto">
+                Discover a curated collection of exquisite craftsmanship and unparalleled luxury.
+            </p>
+            <a href="#collections" class="px-10 py-4 bg-white text-black uppercase tracking-widest text-xs font-semibold hover:bg-gold transition-colors duration-300">
+                Explore Collections
+            </a>
+        </div>
+    </section>
+
+    <!-- Featured Section -->
+    <section id="collections" class="py-24 px-8 md:px-24 bg-white">
+        <div class="flex flex-col md:flex-row justify-between items-end mb-16">
+            <div class="max-w-xl">
+                <h2 class="text-4xl md:text-6xl mb-4 serif">The Winter Edit</h2>
+                <p class="text-gray-600 leading-relaxed">
+                    A symphony of textures and tones, crafted for those who seek the extraordinary. Each piece is a testament to our heritage of excellence.
+                </p>
+            </div>
+            <div class="hidden md:block">
+                <a href="#" class="text-sm uppercase tracking-widest border-b border-black pb-1 hover:text-gold hover:border-gold transition-all">
+                    View All Products
+                </a>
+            </div>
+        </div>
+
+        <!-- Asymmetric Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-8">
+            <div class="md:col-span-7 group cursor-pointer relative overflow-hidden">
+                <img src="https://images.unsplash.com/photo-1583109623-cd379213c361?auto=format&fit=crop&q=80&w=1000" alt="Luxury Watch" class="w-full h-[600px] object-cover transition-transform duration-700 group-hover:scale-105">
+                <div class="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-all duration-300"></div>
+                <div class="absolute bottom-10 left-10 text-white">
+                    <p class="uppercase tracking-widest text-xs mb-2">Timeless Precision</p>
+                    <h3 class="text-3xl serif">The Heritage Chronograph</h3>
+                </div>
+            </div>
+            <div class="md:col-span-5 grid grid-cols-1 gap-8">
+                <div class="group cursor-pointer relative overflow-hidden">
+                    <img src="https://images.unsplash.com/photo-1543163127-23330789104c?auto=format&fit=crop&q=80&w=800" alt="Leather Goods" class="w-full h-[380px] object-cover transition-transform duration-700 group-hover:scale-105">
+                    <div class="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-all duration-300"></div>
+                    <div class="absolute bottom-6 left-6 text-white">
+                        <h3 class="text-xl serif">Artisan Leather</h1>
+                    </div>
+                </div>
+                <div class="group cursor-pointer relative overflow-hidden">
+                    <img src="https://images.unsplash.com/photo-1515886652226-f6143997384e?auto=format&fit=crop&q=80&w=800" alt="Fragrance" class="w-full h-[380px] object-cover transition-transform duration-700 group-hover:scale-105">
+                    <div class="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-all duration-300"></div>
+                    <div class="absolute bottom-6 left-6 text-white">
+                        <h3 class="text-xl serif">Scent of Opulence</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer class="bg-[#1A1A1A] text-white py-20 px-8 md:px-24">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-12">
+            <div class="col-span-1 md:col-span-1">
+                <h3 class="text-2xl serif mb-6">AURELIA</h3>
+                <p class="text-gray-400 text-sm leading-relaxed">
+                    Defining the pinnacle of luxury living through curated artistry and timeless design.
+                </p>
+            </div>
+            <div class="text-sm uppercase tracking-widest">
+                <h4 class="font-semibold mb-6">Explore</h4>
+                <ul class="space-y-4 text-gray-400">
+                    <li><a href="#" class="hover:text-white transition-colors">Collections</a></li>
+                    <li><a href="#" class="hover:text-white transition-colors">Bespoke Service</a></li>
+                    <li><a href="#" class="hover:text-white transition-colors">Our Heritage</a></li>
+                </ul>
+            </div>
+            <div class="text-sm uppercase tracking-widest">
+                <h4 class="font-semibold mb-6">Client Care</h4>
+                <ul class="space-y-4 text-gray-400">
+                    <li><a href="#" class="hover:text-white transition-colors">Shipping & Returns</a></li>
+                    <li><a href="#" class="hover:text-white transition-colors">Size Guide</a></li>
+                    <li><a href="#" class="hover:text-white transition-colors">FAQ</a></li>
+                </ul>
+            </div>
+            <div class="text-sm uppercase tracking-widest">
+                <h4 class="font-semibold mb-6">Newsletter</h4>
+                <div class="flex border-b border-gray-600 pb-2">
+                    <input type="email" placeholder="Your Email" class="bg-transparent border-none outline-none text-sm w-full text-white">
+                    <button class="text-xs uppercase font-bold">Join</button>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        window.addEventListener('scroll', () => {
+            const nav = document.getElementById('main-nav');
+            if (window.scrollY > 50) {
+                nav.classList.add('bg-white', 'shadow-md', 'py-4');
+                nav.classList.remove('bg-transparent', 'py-6');
+                nav.style.color = 'black';
+            } else {
+                nav.classList.remove('bg-white', 'shadow-md', 'py-4');
+                nav.classList.add('bg-transparent', 'py-6');
+                nav.style.color = 'white';
+            }
+        });
+        // Initial state for nav
+        document.getElementById('main-nav').style.color = 'white';
+    </script>
+</body>
+</html>

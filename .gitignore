@@ -1,0 +1,5 @@
+.env
+__pycache__/
+last_request.json
+last_prompt.txt
+last_reply.txt
