@@ -1,0 +1,22 @@
+# Keeps the bot's secrets and data private (Hostinger's LiteSpeed server reads this file).
+Options -Indexes
+
+# .env and other dotfiles, logs and stored conversations must never be downloadable
+<FilesMatch "(^\.|\.(md|log|json|lock|txt)$)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    # lib/ and data/ are only for the PHP scripts
+    RewriteRule ^(lib|data)(/|$) - [F,L]
+    # Pass the Authorization header to PHP (api.php accepts "Authorization: Bearer <API_KEY>")
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+</IfModule>
