@@ -4,7 +4,7 @@ Uses the free model behind https://perchance.org/ai-code-generator through your 
 
 It can also generate images through https://perchance.org/text-to-image-plugin (see [Image generation](#image-generation)).
 
-For a Telegram chat bot that runs on ordinary PHP hosting such as Hostinger, see [telegram-bot/](telegram-bot/README.md).
+For a Telegram chat bot that runs on ordinary PHP hosting such as Hostinger, see [telegram-bot/](telegram-bot/README.md). It reaches Perchance through your own Chrome with the [Perchance Bridge extension](perchance-bridge-extension/README.md), because Perchance only accepts a key from the browser that verified it.
 
 ```
 Cline ──/v1/chat/completions + tools──▶ server.py :8010 ──one prompt──▶ text-generation.perchance.org

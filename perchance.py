@@ -144,6 +144,10 @@ def _request(instruction, start_with, stop, config, result):
             # HTTP 203 {"status":"waiting_for_prev_request_to_finish",...}: another request is still running.
             if "waiting_for_prev_request_to_finish" in text:
                 raise PerchanceBusy(text)
+            # HTTP 400 {"status":"invalid_key"}: the key expired, or Perchance cancelled it (it also does this
+            # when the same key is used from more than one IP address).
+            if "invalid_key" in text:
+                raise PerchanceError("Perchance no longer accepts the userKey (invalid_key). " + REFRESH_HINT)
             raise PerchanceError(f"Perchance returned HTTP {resp.status_code}: {text!r}. " + REFRESH_HINT)
         # Seen in the browser when the key is missing or no longer verified.
         reverify = bool(resp.headers.get("X-Should-Reverify"))

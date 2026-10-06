@@ -77,16 +77,23 @@ if ($token === '') {
         ? 'Bot: @' . $me['result']['username'] : (isset($me['description']) ? $me['description'] : ''));
 }
 
-// 5. Perchance from this server
+// 5. Perchance: from this server, or through the Chrome extension in bridge mode
+$via = bridge_enabled() ? 'through the Perchance Bridge in your browser' : 'from this server';
+if (bridge_enabled()) {
+    $seen = bridge_last_seen();
+    report($seen !== null && $seen <= BRIDGE_ONLINE_SECONDS, 'Perchance Bridge extension is online',
+        $seen === null ? 'It has never connected. Install the extension in Chrome (see perchance-bridge-extension/README.md).'
+            : "Last seen $seen seconds ago.");
+}
 $started = microtime(true);
 try {
-    $reply = with_lock('perchance', 60, function () {
-        return perchance_generate('Reply with exactly one word: pong', [], 0, 60);
+    $reply = with_lock('perchance', 120, function () {
+        return perchance_generate('Reply with exactly one word: pong', [], 0, 120);
     });
-    report(stripos($reply, 'pong') !== false, sprintf('Perchance text generation works from this server (%.1fs)', microtime(true) - $started),
+    report(stripos($reply, 'pong') !== false, sprintf("Perchance text generation works $via (%.1fs)", microtime(true) - $started),
         'Reply: ' . substr(trim($reply), 0, 200));
 } catch (Throwable $e) {
-    report(false, 'Perchance text generation works from this server', $e->getMessage());
+    report(false, "Perchance text generation works $via", $e->getMessage());
 }
 if (!empty($_GET['image'])) {
     try {

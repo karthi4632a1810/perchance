@@ -11,6 +11,8 @@ class PerchanceBusy extends PerchanceError
 {
 }
 
+require_once __DIR__ . '/bridge.php';
+
 define('PERCHANCE_HINT', 'Refresh the Perchance values in .env: open https://perchance.org/ai-code-generator in Chrome, '
     . 'generate once, and copy userKey (Network > generate request > Payload) and the cf_clearance cookie.');
 define('PERCHANCE_IMAGE_HINT', 'Refresh the image values in .env: open https://perchance.org/text-to-image-plugin in Chrome, '
@@ -67,6 +69,9 @@ function random_digits($n)
  */
 function perchance_request($instruction, $startWith, array $stop)
 {
+    if (bridge_enabled()) {
+        return perchance_bridge_request($instruction, $startWith, $stop);
+    }
     $key = cfg('PERCHANCE_USER_KEY');
     if ($key === '') {
         throw new PerchanceError('PERCHANCE_USER_KEY is not set in .env.');
@@ -93,6 +98,11 @@ function perchance_request($instruction, $startWith, array $stop)
         // HTTP 203 {"status":"waiting_for_prev_request_to_finish",...}: another request is still running.
         if (strpos($raw, 'waiting_for_prev_request_to_finish') !== false) {
             throw new PerchanceBusy($raw);
+        }
+        // HTTP 400 {"status":"invalid_key"}: the key expired, or Perchance cancelled it (it also does this
+        // when the same key is used from more than one IP address).
+        if (strpos($raw, 'invalid_key') !== false) {
+            throw new PerchanceError('Perchance no longer accepts the userKey (invalid_key). ' . PERCHANCE_HINT);
         }
         throw new PerchanceError(perchance_http_problem($status, $raw));
     }
@@ -209,6 +219,9 @@ function looks_like_image($data)
  */
 function perchance_image($prompt, $resolution = '512x512', $negativePrompt = '')
 {
+    if (bridge_enabled()) {
+        throw new PerchanceError('Images are not available through the Perchance Bridge yet; only chat is.');
+    }
     $key = cfg('PERCHANCE_IMAGE_USER_KEY');
     $code = cfg('PERCHANCE_AD_ACCESS_CODE');
     if ($key === '' || $code === '') {

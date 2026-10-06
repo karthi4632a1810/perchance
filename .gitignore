@@ -7,3 +7,4 @@ images/
 telegram-bot/data/*
 !telegram-bot/data/.htaccess
 telegram-bot.zip
+perchance-bridge-extension/config.js

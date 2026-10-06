@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Perchance Bridge",
+  "version": "1.0.0",
+  "description": "Runs your Telegram bot's Perchance requests in this browser, where Perchance accepts your key.",
+  "permissions": ["alarms", "storage"],
+  "host_permissions": ["https://*.perchance.org/*", "https://drvinayaksenthil.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://*.perchance.org/*"],
+      "exclude_matches": ["https://text-generation.perchance.org/*", "https://image-generation.perchance.org/*"],
+      "all_frames": true,
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": { "default_title": "Perchance Bridge", "default_popup": "popup.html" }
+}
