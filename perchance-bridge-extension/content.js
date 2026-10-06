@@ -1,13 +1,19 @@
-// Perchance Bridge, page part: runs in the Perchance generator page, asks the extension for work and
-// runs it with the page's own text-generation frame, the same way Perchance's ai-text-plugin does
-// (startStream / streamKeepAlive messages). That frame handles the key and verification itself.
+// Perchance Bridge, page part: runs in the Perchance generator's frame, adds Perchance's
+// text-generation frame the same way the ai-text-plugin does, asks the extension for work and runs it
+// there (startStream / streamKeepAlive messages). That frame handles the key and verification itself.
 (() => {
   const EMBED_ORIGIN = "https://text-generation.perchance.org";
+  const GENERATOR_PATH = "/ai-code-generator";
   const KEEPALIVE_MS = 2000;      // the frame drops a request after 10 s without a keep-alive
   const JOB_TIMEOUT_MS = 170000;
 
+  // The text-generation frame only takes requests from a *.perchance.org parent, which is the
+  // generator's own frame (perchance.org itself is the outer page).
+  if (window === window.top || location.hostname === "perchance.org" || !location.pathname.startsWith(GENERATOR_PATH)) return;
+
   // Timers that keep their pace in background tabs, where Chrome slows normal timers to once a
-  // minute; Perchance's own hiddenSafeWait uses the same Web Worker trick.
+  // minute; Perchance's own hiddenSafeWait uses the same Web Worker trick. A normal timer runs
+  // alongside, in case the page doesn't allow the worker.
   const wait = (() => {
     let worker = null;
     let seq = 0;
@@ -20,11 +26,13 @@
         delete waiting[e.data];
         if (resolve) resolve();
       };
+      worker.onerror = () => { worker = null; };
     } catch (e) {
-      worker = null;   // fall back to normal timers
+      worker = null;
     }
     return (ms) => new Promise((resolve) => {
       if (!worker) return setTimeout(resolve, ms);
+      setTimeout(resolve, ms + 1000);   // in case the worker stops answering
       const id = ++seq;
       waiting[id] = resolve;
       worker.postMessage({ id, ms });
@@ -32,13 +40,44 @@
   })();
 
   const send = (message) => chrome.runtime.sendMessage(message);
-  const findEmbed = () => document.querySelector(`iframe[src^="${EMBED_ORIGIN}/"]`);
+  const status = (text) => send({ type: "status", text }).catch(() => {});
 
-  async function runJob(job, embedFrame) {
+  /** Adds the text-generation frame like the ai-text-plugin does; resolves once it says it's ready. */
+  function addEmbed() {
+    const frame = document.createElement("iframe");
+    frame.id = "perchanceBridgeEmbedIframe";
+    frame.src = `${EMBED_ORIGIN}/embed`;
+    frame.style.cssText = "display:none; position:fixed; top:0.5rem; right:0.5rem; height:3rem; width:11rem; "
+      + "background:#333; border:none; border-radius:3px; z-index:10000";
+    let ready = false;
+    const isReady = new Promise((resolve) => {
+      window.addEventListener("message", (e) => {
+        if (e.source !== frame.contentWindow || e.origin !== EMBED_ORIGIN || !e.data) return;
+        if (e.data.type === "embedIsReady" && !ready) {
+          ready = true;
+          frame.contentWindow.postMessage({ type: "verifyUser" }, EMBED_ORIGIN);
+          resolve(frame);
+        } else if (e.data.type === "verifying") {
+          frame.style.display = "";   // in case Perchance's human check wants a click
+          status("Perchance is checking that you're human. If it doesn't finish, open the Perchance tab.");
+        } else if (e.data.type === "verified") {
+          frame.style.display = "none";
+          status("Ready: waiting for messages.");
+        }
+      });
+    });
+    document.body.appendChild(frame);
+    setTimeout(() => {   // the plugin retries a slow frame the same way
+      if (!ready) frame.src = `${EMBED_ORIGIN}/embed?__cacheBust=${Math.random()}`;
+    }, 15000);
+    return isReady;
+  }
+
+  async function runJob(job, frame) {
     const started = await send({ type: "start", id: job.id });
     if (!started || !started.ok) return;   // another tab took it, or it expired
     const requestId = `bridge-${job.id}-${Math.random().toString(36).slice(2)}`;
-    const target = embedFrame.contentWindow;
+    const target = frame.contentWindow;
     let text = "";
     let stopReason = null;
     let error = null;
@@ -46,7 +85,7 @@
     let finish;
     const finished = new Promise((resolve) => { finish = resolve; });
     const onMessage = (e) => {
-      if (e.origin !== EMBED_ORIGIN || !e.data || e.data.requestId !== requestId) return;
+      if (e.source !== target || e.origin !== EMBED_ORIGIN || !e.data || e.data.requestId !== requestId) return;
       if (e.data.type === "streamData") {
         const value = e.data.value || {};
         if (typeof value.text === "string") text += value.text;
@@ -86,16 +125,23 @@
   async function main() {
     const hello = await send({ type: "hello" }).catch(() => null);
     if (!hello || !hello.bridge) return;   // not the bridge tab
-    // Only the generator's own frame contains the text-generation frame; give the page time to make it.
-    let embed = null;
-    for (let i = 0; i < 120 && !(embed = findEmbed()); i++) await wait(500);
-    if (!embed) return;
+    status("Starting Perchance's text generator...");
+    const frame = await Promise.race([addEmbed(), wait(45000).then(() => null)]);
+    if (!frame) {
+      status("Perchance's text generator didn't start; reloading the tab.");
+      location.reload();
+      return;
+    }
+    status("Ready: waiting for messages.");
     while (true) {
       try {
         // Waits until the server has a job (up to ~20 s), so this loop needs no timers.
         const response = await send({ type: "poll", state: { page: location.href } });
-        if (response && response.job) await runJob(response.job, findEmbed() || embed);
-        else if (!response || response.error) await wait(5000);
+        if (response && response.job) await runJob(response.job, frame);
+        else if (!response || response.error) {
+          if (response && response.error) status(`Problem talking to your server: ${response.error}`);
+          await wait(5000);
+        }
       } catch (e) {
         if (!chrome.runtime || !chrome.runtime.id) return;   // the extension was reloaded: this copy is stale
         await wait(5000);

@@ -30,6 +30,10 @@ async function handle(message, sender) {
   const url = (sender.tab && sender.tab.url) || "";
   if (message.type === "hello") return { bridge: url.startsWith(BRIDGE_PAGE) };
   if (!url.startsWith(BRIDGE_PAGE)) return { error: "not the bridge tab" };
+  if (message.type === "status") {
+    await note({ frameStatus: message.text, frameStatusTime: Date.now() });
+    return { ok: true };
+  }
   if (message.type === "poll") {
     await note({ lastPoll: Date.now() });
     const data = await callBridge("poll", { wait: 20, state: message.state || {} }, 35000);
@@ -59,11 +63,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // if Chrome discarded or froze it, or if it stopped asking for work.
 async function watchdog() {
   const tabs = await chrome.tabs.query({ url: BRIDGE_PAGE + "*" });
-  const { lastPoll = 0, lastTabAction = 0 } = await chrome.storage.local.get(["lastPoll", "lastTabAction"]);
+  const { lastPoll = 0, lastTabAction = 0, frameStatusTime = 0 } =
+    await chrome.storage.local.get(["lastPoll", "lastTabAction", "frameStatusTime"]);
   if (tabs.length === 0) {
     await chrome.tabs.create({ url: BRIDGE_PAGE, pinned: true, active: false });
     await note({ lastTabAction: Date.now() });
-  } else if (tabs[0].discarded || Date.now() - Math.max(lastPoll, lastTabAction) > STALE_MS) {
+  } else if (tabs[0].discarded || Date.now() - Math.max(lastPoll, lastTabAction, frameStatusTime) > STALE_MS) {
     await chrome.tabs.reload(tabs[0].id);
     await note({ lastTabAction: Date.now() });
   }

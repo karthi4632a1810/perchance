@@ -1,11 +1,12 @@
 const BRIDGE_PAGE = "https://perchance.org/ai-code-generator";
 const ago = (time) => (time ? `${Math.round((Date.now() - time) / 1000)} s ago` : "never");
 
-chrome.storage.local.get(["lastPoll", "done", "lastJob", "lastJobError", "lastError", "lastErrorTime"]).then((s) => {
+chrome.storage.local.get(["lastPoll", "done", "lastJob", "lastJobError", "lastError", "lastErrorTime", "frameStatus", "frameStatusTime"]).then((s) => {
   const online = s.lastPoll && Date.now() - s.lastPoll < 60000;
   document.getElementById("status").textContent = online
     ? "🟢 Online: your bot can use Perchance"
     : "🔴 Offline: the Perchance tab isn't asking for work";
+  if (s.frameStatus) document.getElementById("tab").textContent = `Perchance tab (${ago(s.frameStatusTime)}): ${s.frameStatus}`;
   document.getElementById("jobs").textContent = `Replies made: ${s.done || 0} (last ${ago(s.lastJob)})`
     + (s.lastJobError ? `. Last one failed: ${s.lastJobError}` : "");
   if (s.lastError && Date.now() - (s.lastErrorTime || 0) < 10 * 60000) {
