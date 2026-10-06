@@ -14,8 +14,8 @@ Options -Indexes
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    # lib/ and data/ are only for the PHP scripts
-    RewriteRule ^(lib|data)(/|$) - [F,L]
+    # lib/, data/ and knowledge/ are only for the PHP scripts
+    RewriteRule ^(lib|data|knowledge)(/|$) - [F,L]
     # Pass the Authorization header to PHP (api.php accepts "Authorization: Bearer <API_KEY>")
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]

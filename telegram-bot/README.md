@@ -25,6 +25,7 @@ Perchance only accepts a key from the browser and IP address that verified it. A
 | `setup.php` | Checks the server and connects the bot to Telegram. It needs `?secret=<TELEGRAM_WEBHOOK_SECRET>`. |
 | `poll.php` | Runs the bot from a command line without a webhook (`php poll.php`) |
 | `lib/` | Shared code. It is a port of `perchance.py`, plus the bridge queue. |
+| `knowledge/` | Your notes about yourself, which the bot uses in your private chat (see below) |
 | `data/` | Conversations, bridge jobs, the bot owner and a log (`bot.log`). It is created automatically. |
 | `.env` | Settings and secrets |
 | `.htaccess` | Blocks web access to `.env`, `lib/` and `data/` |
@@ -53,6 +54,12 @@ In groups, the bot only answers `/ask <question>` and replies to its own message
 
 To let other people use the bot, add their user IDs (they can get them with `/id`) or @usernames to `TELEGRAM_ALLOWED_USERS`, comma-separated. Use `*` to let everyone use it.
 
+## Notes about you (`knowledge/`)
+
+Put Markdown or text files about yourself in `knowledge/`, for example `knowledge/PERSONAL.md`. In your private chat, the bot uses them to answer questions like "what's my backend stack?". It says it doesn't know when something isn't in your notes.
+
+Your notes are only used for you, the owner: the first user in `TELEGRAM_ALLOWED_USERS`, or whoever claimed the bot. Other users and groups never get them. `api.php` only uses them when a request includes `"knowledge": true`. The folder is blocked from the web and kept out of git. Every message that uses your notes sends them to Perchance as part of the prompt.
+
 ## Chat API
 
 ```bash
@@ -62,7 +69,7 @@ curl -X POST https://YOUR-DOMAIN/telegram-bot/api.php \
 # {"reply": "...", "conversation_id": "3f9c..."}
 ```
 
-To continue the same conversation, send `"conversation_id"` back with the next message. Add `"reset": true` to start that conversation over.
+To continue the same conversation, send `"conversation_id"` back with the next message. Add `"reset": true` to start that conversation over, or `"knowledge": true` to include your notes from `knowledge/`.
 
 ## Settings (`.env`)
 
@@ -78,6 +85,7 @@ To continue the same conversation, send `"conversation_id"` back with the next m
 | `BRIDGE_TIMEOUT` | Seconds to wait for the extension's answer. Default 180. |
 | `PERCHANCE_*` | `direct` mode only: the Perchance session from your browser |
 | `PERCHANCE_MAX_CONTINUES` | Extra requests for replies longer than Perchance's 1,024-token limit. Default 3. |
+| `KNOWLEDGE_MAX_CHARS` | How much of your notes is used. Default 15000. |
 | `HISTORY_MAX_CHARS` | How much of the conversation is sent with each message. Default 12000. |
 | `PERCHANCE_IMAGE_ALLOW_NSFW` | `true` sends images Perchance flags as possibly NSFW. The site hides these by default, and so does the bot. |
 

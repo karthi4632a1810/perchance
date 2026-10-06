@@ -55,6 +55,23 @@ function user_allowed(array $from)
     });
 }
 
+/**
+ * The bot's owner: the first user in TELEGRAM_ALLOWED_USERS, or whoever claimed the bot (data/owner.json).
+ * Only the owner's private chat gets the notes in knowledge/.
+ */
+function is_owner(array $from)
+{
+    $id = isset($from['id']) ? (string) $from['id'] : '';
+    $username = isset($from['username']) ? strtolower($from['username']) : '';
+    $allowed = trim(cfg('TELEGRAM_ALLOWED_USERS'));
+    if ($allowed !== '' && $allowed !== '*') {
+        $first = strtolower(trim(explode(',', $allowed)[0]));
+        return $id !== '' && ($first === $id || ($username !== '' && ltrim($first, '@') === $username));
+    }
+    $owner = json_decode((string) @file_get_contents(DATA_DIR . '/owner.json'), true);
+    return $id !== '' && is_array($owner) && isset($owner['owner']) && (string) $owner['owner'] === $id;
+}
+
 /** "/image@MyBot wide a castle" -> ["/image", "wide a castle"]. */
 function parse_command($text)
 {
@@ -130,7 +147,8 @@ function handle_update(array $update)
         }
     };
     try {
-        $reply = chat_reply("tg-$chatId", $text, $keepTyping);
+        $knowledge = !$isGroup && is_owner($from) ? knowledge_text() : '';
+        $reply = chat_reply("tg-$chatId", $text, $keepTyping, $knowledge);
     } catch (Throwable $e) {
         bot_log("Chat $chatId: " . $e->getMessage());
         $reply = '⚠️ ' . $e->getMessage();

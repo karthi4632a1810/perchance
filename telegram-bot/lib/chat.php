@@ -27,10 +27,32 @@ function trim_history(array $messages)
     return $messages;
 }
 
-/** Perchance takes one instruction, so the chat becomes a transcript (the format agent.py uses). */
-function build_chat_prompt(array $messages)
+/** Your notes for the bot (knowledge/*.md and *.txt except README.md), or '' if there are none. */
+function knowledge_text()
 {
-    $parts = ["# Instructions\n" . cfg('BOT_SYSTEM_PROMPT', DEFAULT_SYSTEM_PROMPT), '# Conversation so far'];
+    $files = array_merge(glob(BOT_DIR . '/knowledge/*.md') ?: [], glob(BOT_DIR . '/knowledge/*.txt') ?: []);
+    sort($files);
+    $text = '';
+    foreach ($files as $file) {
+        if (strcasecmp(basename($file), 'README.md') !== 0) {
+            $text .= trim((string) file_get_contents($file)) . "\n\n";
+        }
+    }
+    $text = utf8_cut(trim($text), (int) cfg('KNOWLEDGE_MAX_CHARS', '15000'));
+    // An unclosed ``` block would swallow the rest of the prompt.
+    return preg_match_all('/^```/m', $text) % 2 === 1 ? "$text\n```" : $text;
+}
+
+/** Perchance takes one instruction, so the chat becomes a transcript (the format agent.py uses). */
+function build_chat_prompt(array $messages, $knowledge = '')
+{
+    $parts = ["# Instructions\n" . cfg('BOT_SYSTEM_PROMPT', DEFAULT_SYSTEM_PROMPT)];
+    if ($knowledge !== '') {
+        $parts[] = "# About the user\nThe user you are talking to wrote these notes about themselves (\"I\" and \"my\" in them "
+            . "mean the user). Use them to answer questions about the user and to tailor your answers. If something isn't "
+            . "in the notes, say you don't know it instead of guessing.\n\n" . $knowledge;
+    }
+    $parts[] = '# Conversation so far';
     foreach ($messages as $m) {
         $parts[] = ($m['role'] === 'assistant' ? "=== ASSISTANT (you) ===\n" : "=== USER ===\n") . $m['content'];
     }
@@ -52,16 +74,16 @@ function clean_reply($text)
  * Adds the user's message to the conversation, asks Perchance for the reply and stores both.
  * Runs under one lock, because Perchance only works on one request per key at a time anyway.
  */
-function chat_reply($conversationId, $userText, $onProgress = null)
+function chat_reply($conversationId, $userText, $onProgress = null, $knowledge = '')
 {
-    return with_lock('perchance', 240, function () use ($conversationId, $userText, $onProgress) {
+    return with_lock('perchance', 240, function () use ($conversationId, $userText, $onProgress, $knowledge) {
         $file = conversation_file($conversationId);
         $messages = with_json_file($file, function (array &$data) {
             return isset($data['messages']) ? $data['messages'] : [];
         });
         $messages[] = ['role' => 'user', 'content' => $userText];
         $messages = trim_history($messages);
-        $reply = clean_reply(perchance_generate(build_chat_prompt($messages), CHAT_STOP, null, 150, $onProgress));
+        $reply = clean_reply(perchance_generate(build_chat_prompt($messages, $knowledge), CHAT_STOP, null, 150, $onProgress));
         if ($reply === '') {
             $reply = '(Perchance returned an empty reply. Please try again.)';
         }

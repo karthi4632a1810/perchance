@@ -2,7 +2,8 @@
 // JSON chat API over the same chat model as the Telegram bot.
 //
 //   POST api.php   Header: X-API-Key: <API_KEY from .env>   (or Authorization: Bearer <API_KEY>)
-//   Body: {"message": "Hi!", "conversation_id": "optional-id", "reset": false}
+//   Body: {"message": "Hi!", "conversation_id": "optional-id", "reset": false, "knowledge": false}
+//   "knowledge": true adds your notes from knowledge/ (see knowledge/README.md).
 //   Answer: {"reply": "...", "conversation_id": "..."}
 // Send the conversation_id from the answer with the next message to continue the same conversation.
 
@@ -50,7 +51,8 @@ if ($message === '') {
 
 @set_time_limit(300);
 try {
-    json_out(200, ['reply' => chat_reply("api-$conversation", $message), 'conversation_id' => $conversation]);
+    $knowledge = !empty($input['knowledge']) ? knowledge_text() : '';   // your notes, only when asked for
+    json_out(200, ['reply' => chat_reply("api-$conversation", $message, null, $knowledge), 'conversation_id' => $conversation]);
 } catch (Throwable $e) {
     bot_log("API $conversation: " . $e->getMessage());
     json_out(502, ['error' => $e->getMessage(), 'conversation_id' => $conversation]);
