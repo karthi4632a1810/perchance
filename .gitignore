@@ -12,3 +12,4 @@ telegram-bot/knowledge/*
 !telegram-bot/knowledge/.htaccess
 !telegram-bot/knowledge/README.md
 telegram-bot-update.zip
+perchance-telegram-extension/config.js
