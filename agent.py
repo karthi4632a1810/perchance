@@ -555,11 +555,12 @@ def split_fenced(text):
 
 
 def _repair_json(text):
-    """Fixes two slips the model makes at the end of long calls: an escape like \\n written between
-    tokens (`..."}\\n}}`) and missing closing brackets. Returns None if nothing could be fixed."""
+    """Fixes slips the model makes at the end of long calls: an escape like \\n written between
+    tokens (`..."}\\n}}`), backticks closing strings (`...`}`), unterminated strings, and missing closing brackets."""
+    t = re.sub(r"`\s*([,\}\]])", r'"\1', text)
     out, closers, in_string, escaped, i = [], [], False, False, 0
-    while i < len(text):
-        ch = text[i]
+    while i < len(t):
+        ch = t[i]
         if in_string:
             if escaped:
                 escaped = False
@@ -567,7 +568,7 @@ def _repair_json(text):
                 escaped = True
             elif ch == '"':
                 in_string = False
-        elif ch == "\\" and text[i + 1:i + 2] in ("n", "r", "t"):
+        elif ch == "\\" and t[i + 1:i + 2] in ("n", "r", "t"):
             i += 2
             continue
         elif ch == '"':
@@ -579,7 +580,9 @@ def _repair_json(text):
         out.append(ch)
         i += 1
     if in_string:
-        return None
+        if escaped and out:
+            out.pop()
+        out.append('"')
     repaired = "".join(out) + "".join(reversed(closers))
     return repaired if repaired != text else None
 
